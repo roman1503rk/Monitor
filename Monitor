@@ -1,0 +1,150 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <pthread.h>
+#include <unistd.h>
+#include <stdbool.h>
+
+typedef struct
+{
+    int id; // номер события
+    const char *message; // указатель на строку
+} event_data_t;
+
+typedef struct
+{
+    pthread_mutex_t mutex; // мьютекс
+    pthread_cond_t cond; // переменная, на которой потоки спят, пока не изменится состояние
+    bool ready; // флаг события
+    event_data_t *data; // указатель на переданные данные
+    bool stopping; // флаг завершения
+} monitor_t;
+
+void monitor_init(monitor_t *m)
+{
+    pthread_mutex_init(&m->mutex, NULL); // инициализация мьютекса
+    pthread_cond_init(&m->cond, NULL); // инициализация условной переменной
+    m->ready = false; // событие пустое
+    m->data = NULL; // указатель на данные пустой
+    m->stopping = false; // завершение не запрошено
+}
+
+void monitor_destroy(monitor_t *m)
+{
+    pthread_mutex_destroy(&m->mutex); // уничтожение мьютекса
+    pthread_cond_destroy(&m->cond); // уничтожение условной переменной
+}
+
+void *producer(void *arg)
+{
+    monitor_t *m = (monitor_t *)arg; // приведение к типу monitor_t
+    int counter = 0; // счётчик событий
+
+    while (!m->stopping) // пока не остановили
+    {
+        sleep(1); // сон 1 секунда
+
+        event_data_t *ev = malloc(sizeof(event_data_t)); // объявили память
+        if (!ev)
+        {
+            perror("memory"); // ошибка, если памяти не хватило
+            break;
+        }
+        ev->id = ++counter; // увеличиваем счётчик
+        ev->message = "event"; 
+
+        pthread_mutex_lock(&m->mutex); // захват мьютекса
+
+        while (m->ready && !m->stopping) // пока событие == true и нет просьбы остановиться
+        {
+            pthread_cond_wait(&m->cond, &m->mutex); // временно освобождает переданный мьютекс
+        }
+
+        if (m->stopping) // сигнал завершения
+        {
+            pthread_mutex_unlock(&m->mutex); // освобождение мьютекса
+            free(ev); // освобождение памяти
+            break;
+        }
+
+        m->data = ev; 
+        m->ready = true; // флаг на true
+
+        printf("Поставщик: событие %d отправлено\n", ev->id);
+        fflush(stdout); // сбрасываем буфер ввода
+
+        pthread_cond_signal(&m->cond); // уведомление одного ожидающего потока
+        pthread_mutex_unlock(&m->mutex); // освобождение потока
+    }
+
+    return NULL;
+}
+
+void *consumer(void *arg) 
+{
+    monitor_t *m = (monitor_t *)arg;
+
+    while (1)
+    {
+        pthread_mutex_lock(&m->mutex); // захватываем мьютекс
+
+        while (!m->ready && !m->stopping) // пока нет нового события и не запрошено завершение
+        {
+            pthread_cond_wait(&m->cond, &m->mutex); // ожидание уведомления
+        }
+
+        if (m->stopping && !m->ready) // если необходимо остановиться и нет события
+        {
+            pthread_mutex_unlock(&m->mutex); // освобождение мьютекса
+            break;
+        }
+
+        event_data_t *ev = m->data; // сохраняем указатель на данные
+        m->data = NULL; // обнуляем поле
+        m->ready = false; // событие обработано
+
+        pthread_cond_signal(&m->cond); // уведомление одного ожидающего потока
+        pthread_mutex_unlock(&m->mutex); // освобождаем мьютекс
+
+        printf("Потребитель: событие %d обработано\n", ev->id);
+        fflush(stdout);
+        free(ev);
+    }
+
+    return NULL;
+}
+
+
+
+int main(void)
+{
+    monitor_t monitor; // создаём монитор
+    monitor_init(&monitor); // инициализируем мьютекс и условную переменную
+
+    pthread_t prod_thread, cons_thread; // два идентификатора потока
+
+    // инициализация потоков
+    if (pthread_create(&prod_thread, NULL, producer, &monitor) != 0)
+    {
+        perror("pthread_create producer");
+        return 1;
+    }
+    if (pthread_create(&cons_thread, NULL, consumer, &monitor) != 0)
+    {
+        perror("pthread_create consumer");
+        return 1;
+    }
+
+    sleep(10);
+
+    pthread_mutex_lock(&monitor.mutex); // захват мьютекса
+    monitor.stopping = true; // флаг в true
+    pthread_cond_broadcast(&monitor.cond); // пробуждение всех потоков
+    pthread_mutex_unlock(&monitor.mutex); // освобождение мьютекса
+
+    // завершение потоков
+    pthread_join(prod_thread, NULL);
+    pthread_join(cons_thread, NULL);
+
+    monitor_destroy(&monitor); // уничтожение мьютекса и условной переменной
+    return 0;
+}
