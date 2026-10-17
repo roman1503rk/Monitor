@@ -39,7 +39,7 @@ void *producer(void *arg)
     monitor_t *m = (monitor_t *)arg; // приведение к типу monitor_t
     int counter = 0; // счётчик событий
 
-    while (!m->stopping) // пока не остановили
+    while (1)
     {
         sleep(1); // сон 1 секунда
 
@@ -54,17 +54,24 @@ void *producer(void *arg)
 
         pthread_mutex_lock(&m->mutex); // захват мьютекса
 
-        while (m->ready && !m->stopping) // пока событие == true и нет просьбы остановиться
-        {
-            pthread_cond_wait(&m->cond, &m->mutex); // временно освобождает переданный мьютекс
-        }
-
         if (m->stopping) // сигнал завершения
         {
             pthread_mutex_unlock(&m->mutex); // освобождение мьютекса
             free(ev); // освобождение памяти
             break;
         }
+
+        while (m->ready) // пока событие == true и нет просьбы остановиться
+        {
+            pthread_cond_wait(&m->cond, &m->mutex); // временно освобождает переданный мьютекс
+            if (m->stopping) // сигнал завершения
+            {
+                pthread_mutex_unlock(&m->mutex); // освобождение мьютекса
+                free(ev); // освобождение памяти
+                break;
+            }
+        }
+
 
         m->data = ev; 
         m->ready = true; // флаг на true
