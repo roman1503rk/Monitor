@@ -12,7 +12,7 @@
 // флаг и обработчик сигнала
 static volatile sig_atomic_t was_sighup = 0;
 
-static void sighup_handler(int signal number)
+static void sighup_handler(int signal_number)
 {   
     was_sighup = 1;
 }
