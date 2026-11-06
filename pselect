@@ -120,8 +120,7 @@ int main(int argc, char **argv)
         // сброс флага и вызов pselect
         was_sighup = 0;
 
-        sigset_t wait_mask;
-        sigemptyset(&wait_mask);
+        sigset_t wait_mask = original_mask;
 
         // max_fd + 1 — до какого бита просматривать
         // &read_fds — ждём готовность к чтению
@@ -207,10 +206,6 @@ int main(int argc, char **argv)
                 if (errno == EINTR) 
                 {
                     // прервано сигналом — повторим
-                } 
-                else if (errno == EAGAIN || errno == EWOULDBLOCK)
-                {
-                    // сокет неблокирующий — нормально
                 } 
                 else 
                 {
