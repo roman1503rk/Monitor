@@ -1,0 +1,53 @@
+#!/bin/sh
+set -u
+
+PROG=$(basename "$0")
+die() { echo "$PROG: error: $2" >&2; exit "$1"; }
+
+TMPDIR_BUILD=
+cleanup() {
+    rc=$?
+    trap - EXIT HUP INT QUIT PIPE TERM
+    [ -n "$TMPDIR_BUILD" ] && [ -d "$TMPDIR_BUILD" ] && rm -rf -- "$TMPDIR_BUILD"
+    exit "$rc"
+}
+trap cleanup EXIT HUP INT QUIT PIPE TERM
+
+[ $# -eq 1 ] || die 1 "usage: $PROG <source-file>"
+SRC=$1
+[ -f "$SRC" ] || die 1 "no such file: $SRC"
+
+SRC_DIR=$(dirname -- "$SRC")
+SRC_BASE=$(basename -- "$SRC")
+EXT=${SRC_BASE##*.}
+
+OUT_NAME=$(sed -n \
+    -e 's|^[[:space:]]*#[[:space:]]*Output:[[:space:]]*||p' \
+    -e 's|^[[:space:]]*//[[:space:]]*Output:[[:space:]]*||p' \
+    -e 's|^[[:space:]]*%[[:space:]]*Output:[[:space:]]*||p' \
+    -- "$SRC" | head -n1)
+[ -n "$OUT_NAME" ] || die 2 "no 'Output:' comment in $SRC"
+
+TMPDIR_BUILD=$(mktemp -d) || die 5 "mktemp failed"
+
+case "$EXT" in
+    c)
+        gcc -O2 -c -o "$TMPDIR_BUILD/a.o" "$SRC" || die 4 "C compile failed"
+        gcc -o "$TMPDIR_BUILD/$OUT_NAME" "$TMPDIR_BUILD/a.o" || die 4 "C link failed"
+        ;;
+    cpp|cc|cxx)
+        g++ -O2 -c -o "$TMPDIR_BUILD/a.o" "$SRC" || die 4 "C++ compile failed"
+        g++ -o "$TMPDIR_BUILD/$OUT_NAME" "$TMPDIR_BUILD/a.o" || die 4 "C++ link failed"
+        ;;
+    tex)
+        cp -- "$SRC" "$TMPDIR_BUILD/" || die 4 "cp failed"
+        ( cd "$TMPDIR_BUILD" && pdflatex -interaction=nonstopmode "$SRC_BASE" >/dev/null 2>&1 ) \
+            || die 4 "pdflatex failed"
+        ;;
+    *)
+        die 3 "unsupported: .$EXT"
+        ;;
+esac
+
+mv -f -- "$TMPDIR_BUILD/$OUT_NAME" "$SRC_DIR/$OUT_NAME" || die 6 "cannot install result"
+echo "$PROG: built $SRC_DIR/$OUT_NAME"
