@@ -1,40 +1,40 @@
-#!/bin/sh // запуск скрипта
+#!/bin/sh
 set -u 
 
-PROG=$(basename "$0") // имя скрипта без пути
-die() { echo "$PROG: error: $2" >&2; exit "$1"; } // функция для указания на ошибку
+PROG=$(basename "$0") # имя скрипта без пути
+die() { echo "$PROG: error: $2" >&2; exit "$1"; } # функция для указания на ошибку
 
-TMPDIR_BUILD= // пока временного каталога нет - переменная пустая
+TMPDIR_BUILD= # пока временного каталога нет - переменная пустая
 cleanup()
 {
-    rc=$? // код возврата последней команды
-    trap - EXIT HUP INT QUIT PIPE TERM // от рекурсии
-    [ -n "$TMPDIR_BUILD" ] && [ -d "$TMPDIR_BUILD" ] && rm -rf -- "$TMPDIR_BUILD" // если переменная не пустая и каталог существует - удалить
-    exit "$rc" // выход с кодом
+    rc=$? # код возврата последней команды
+    trap - EXIT HUP INT QUIT PIPE TERM # от рекурсии
+    [ -n "$TMPDIR_BUILD" ] && [ -d "$TMPDIR_BUILD" ] && rm -rf -- "$TMPDIR_BUILD" # если переменная не пустая и каталог существует - удалить
+    exit "$rc" # выход с кодом
 }
 trap cleanup EXIT HUP INT QUIT PIPE TERM
 
-[ $# -eq 1 ] || die 1 "usage: $PROG <source-file>" // ровно один аргумент
-SRC=$1 // запоминаем первый аргумент
-[ -f "$SRC" ] || die 1 "no such file: $SRC" // проверка что файл
+[ $# -eq 1 ] || die 1 "usage: $PROG <source-file>" # ровно один аргумент
+SRC=$1 # запоминаем первый аргумент
+[ -f "$SRC" ] || die 1 "no such file: $SRC" # проверка что файл
 
-SRC_DIR=$(dirname -- "$SRC") // каталог где лежит файл
-SRC_BASE=$(basename -- "$SRC") // имя файла без пути
-EXT=${SRC_BASE##*.} // отрежь всё до точки
+SRC_DIR=$(dirname -- "$SRC") # каталог где лежит файл
+SRC_BASE=$(basename -- "$SRC") # имя файла без пути
+EXT=${SRC_BASE##*.} # отрежь всё до точки
 
 OUT_NAME=$(sed -n \
     -e 's|^[[:space:]]*#[[:space:]]*Output:[[:space:]]*||p' \
     -e 's|^[[:space:]]*//[[:space:]]*Output:[[:space:]]*||p' \
     -e 's|^[[:space:]]*%[[:space:]]*Output:[[:space:]]*||p' \
-    -- "$SRC" | head -n1) // замена по шаблону
-[ -n "$OUT_NAME" ] || die 2 "no 'Output:' comment in $SRC" // не нашли комментарий с именем конечного файла
+    -- "$SRC" | head -n1) # замена по шаблону
+[ -n "$OUT_NAME" ] || die 2 "no 'Output:' comment in $SRC" # не нашли комментарий с именем конечного файла
 
-TMPDIR_BUILD=$(mktemp -d) || die 5 "mktemp failed" // создай каталог иначе ошибка
+TMPDIR_BUILD=$(mktemp -d) || die 5 "mktemp failed" # создай каталог иначе ошибка
 
 case "$EXT" in
     c)
-        gcc -O2 -c -o "$TMPDIR_BUILD/a.o" "$SRC" || die 4 "C compile failed" // компиляция провалилась
-        gcc -o "$TMPDIR_BUILD/$OUT_NAME" "$TMPDIR_BUILD/a.o" || die 4 "C link failed" // линковка провалилась
+        gcc -O2 -c -o "$TMPDIR_BUILD/a.o" "$SRC" || die 4 "C compile failed" # компиляция провалилась
+        gcc -o "$TMPDIR_BUILD/$OUT_NAME" "$TMPDIR_BUILD/a.o" || die 4 "C link failed" # линковка провалилась
         ;;
     cpp|cc|cxx)
         g++ -O2 -c -o "$TMPDIR_BUILD/a.o" "$SRC" || die 4 "C++ compile failed"
@@ -46,9 +46,9 @@ case "$EXT" in
             || die 4 "pdflatex failed"
         ;;
     *)
-        die 3 "unsupported: .$EXT" // неизвестное расширение
+        die 3 "unsupported: .$EXT" # неизвестное расширение
         ;;
 esac
 
-mv -f -- "$TMPDIR_BUILD/$OUT_NAME" "$SRC_DIR/$OUT_NAME" || die 6 "cannot install result" // перенос из временного каталога в каталог исходника
-echo "$PROG: built $SRC_DIR/$OUT_NAME" // сообщить что всё хорошо
+mv -f -- "$TMPDIR_BUILD/$OUT_NAME" "$SRC_DIR/$OUT_NAME" || die 6 "cannot install result" # перенос из временного каталога в каталог исходника
+echo "$PROG: built $SRC_DIR/$OUT_NAME" # сообщить что всё хорошо
