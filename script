@@ -1,54 +1,49 @@
 #!/bin/sh
-set -u 
 
-PROG=$(basename "$0") # имя скрипта без пути
-die() { echo "$PROG: error: $2" >&2; exit "$1"; } # функция для указания на ошибку
+SHARED_DIR="/shared" # путь к общей папке
+LOCK_FILE="${SHARED_DIR}/.lock" # путь к служебному файлу
+COUNTER=0 # счётчик созданных файлов этого контейнера
 
-TMPDIR_BUILD= # пока временного каталога нет - переменная пустая
-cleanup()
-{
-    rc=$? # код возврата последней команды
-    trap - EXIT HUP INT QUIT PIPE TERM # от рекурсии
-    [ -n "$TMPDIR_BUILD" ] && [ -d "$TMPDIR_BUILD" ] && rm -rf -- "$TMPDIR_BUILD" # если переменная не пустая и каталог существует - удалить
-    exit "$rc" # выход с кодом
-}
-trap cleanup EXIT HUP INT QUIT PIPE TERM
+CONTAINER_ID=$(od -An -N3 -tx1 /dev/urandom | tr -d ' \n') # случайный идентификатор контейнера
+if [ -z "$CONTAINER_ID" ]; then
+    CONTAINER_ID="fallback_$$" # запасное имя
+fi
+echo "Container ID: $CONTAINER_ID"
 
-[ $# -eq 1 ] || die 1 "usage: $PROG <source-file>" # ровно один аргумент
-SRC=$1 # запоминаем первый аргумент
-[ -f "$SRC" ] || die 1 "no such file: $SRC" # проверка что файл
+while true; do
+    COUNTER=$((COUNTER + 1))
+    FILENAME=""
 
-SRC_DIR=$(dirname -- "$SRC") # каталог где лежит файл
-SRC_BASE=$(basename -- "$SRC") # имя файла без пути
-EXT=${SRC_BASE##*.} # отрежь всё до точки
+    (
+        flock -x 9 # блокировка на дескриптор 9
 
-OUT_NAME=$(sed -n \
-    -e 's|^[[:space:]]*#[[:space:]]*Output:[[:space:]]*||p' \
-    -e 's|^[[:space:]]*//[[:space:]]*Output:[[:space:]]*||p' \
-    -e 's|^[[:space:]]*%[[:space:]]*Output:[[:space:]]*||p' \
-    -- "$SRC" | head -n1) # замена по шаблону
-[ -n "$OUT_NAME" ] || die 2 "no 'Output:' comment in $SRC" # не нашли комментарий с именем конечного файла
+        i=1
+        while [ $i -le 999 ]; do
+            name=$(printf "%03d" "$i") # число с ведущими нулями
+            filepath="${SHARED_DIR}/${name}" # полный путь
+            if [ ! -e "$filepath" ]; then # существует ли файл с таким именем
+                > "$filepath" # создаём имя
+                FILENAME="$filepath" # запоминаем имя
+                break
+            fi
+            i=$((i + 1))
+        done
+        # свободных мест нет
+        if [ -z "$FILENAME" ]; then
+            exit 1
+        fi
+    ) 9>"$LOCK_FILE" # привязываем дескриптор 9
 
-TMPDIR_BUILD=$(mktemp -d) || die 5 "mktemp failed" # создай каталог иначе ошибка
+    if [ -z "$FILENAME" ]; then
+        echo "No free slot available, retrying..."
+        sleep 1
+        COUNTER=$((COUNTER - 1))
+        continue
+    fi
 
-case "$EXT" in
-    c)
-        gcc -O2 -c -o "$TMPDIR_BUILD/a.o" "$SRC" || die 4 "C compile failed" # компиляция провалилась
-        gcc -o "$TMPDIR_BUILD/$OUT_NAME" "$TMPDIR_BUILD/a.o" || die 4 "C link failed" # линковка провалилась
-        ;;
-    cpp|cc|cxx)
-        g++ -O2 -c -o "$TMPDIR_BUILD/a.o" "$SRC" || die 4 "C++ compile failed"
-        g++ -o "$TMPDIR_BUILD/$OUT_NAME" "$TMPDIR_BUILD/a.o" || die 4 "C++ link failed"
-        ;;
-    tex)
-        cp -- "$SRC" "$TMPDIR_BUILD/" || die 4 "cp failed"
-        ( cd "$TMPDIR_BUILD" && pdflatex -interaction=nonstopmode "$SRC_BASE" >/dev/null 2>&1 ) \
-            || die 4 "pdflatex failed"
-        ;;
-    *)
-        die 3 "unsupported: .$EXT" # неизвестное расширение
-        ;;
-esac
+    echo "${CONTAINER_ID} ${COUNTER}" > "$FILENAME" # запись в созданный фай
 
-mv -f -- "$TMPDIR_BUILD/$OUT_NAME" "$SRC_DIR/$OUT_NAME" || die 6 "cannot install result" # перенос из временного каталога в каталог исходника
-echo "$PROG: built $SRC_DIR/$OUT_NAME" # сообщить что всё хорошо
+    rm -f "$FILENAME" # удаление файла
+
+    sleep 1 # пауза в одну секунду
+done
