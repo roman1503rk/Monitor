@@ -14,8 +14,10 @@ while true; do
     COUNTER=$((COUNTER + 1))
     FILENAME=""
 
-    (
-        flock -x 9 # блокировка на дескриптор 9
+    
+        exec 9>"$LOCK_FILE"
+
+        flock -x 9
 
         i=1
         while [ $i -le 999 ]; do
@@ -28,11 +30,8 @@ while true; do
             fi
             i=$((i + 1))
         done
-        # свободных мест нет
-        if [ -z "$FILENAME" ]; then
-            exit 1
-        fi
-    ) 9>"$LOCK_FILE" # привязываем дескриптор 9
+        
+    exec 9>&-
 
     if [ -z "$FILENAME" ]; then
         echo "No free slot available, retrying..."
@@ -41,7 +40,9 @@ while true; do
         continue
     fi
 
-    echo "${CONTAINER_ID} ${COUNTER}" > "$FILENAME" # запись в созданный фай
+    echo "${CONTAINER_ID} ${COUNTER}" > "$FILENAME" # запись в созданный файл
+
+    sleep 0.1
 
     rm -f "$FILENAME" # удаление файла
 
